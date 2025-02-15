@@ -53,5 +53,5 @@ The authors sincerely hope to receive any suggestions from you!
 IF you have any problem, please contact us.  Email: 23B903048@stu.hit.edu.cn
 ## Architecture
 <p align="center">
-<img src="[https://github.com/ChanganMakeYi/THLAnet/THLAnet.png](https://github.com/ChanganMakeYi/THLAnet/blob/main/THLAnet.png)" align="middle" height="80%" width="80%" />
+<img src="https://github.com/ChanganMakeYi/THLAnet/blob/main/THLAnet.png" align="middle" height="80%" width="80%" />
 </p >
