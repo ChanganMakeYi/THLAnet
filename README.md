@@ -1,4 +1,7 @@
 # Deep Learning-Based Prediction of T-Cell Receptor-Antigen Binding Recognition
+<p align="center">
+<img src="https://github.com/ChanganMakeYi/THLAnet/blob/main/THLAnet.png" align="middle" height="80%" width="80%" />
+</p >
 Adaptive immunity is a targeted immune response that enables the body to identify and eliminate foreign pathogens, playing a critical role in the anti-tumor immune response. Tumor cell expression of antigens forms the foundation for inducing this adaptive response. However, the human leukocyte antigens (HLA)-restricted recognition of antigens by T-cell receptors (TCR) limits their ability to detect all neoantigens, with only a small subset capable of activating T-cells. Accurately predicting neoantigen binding to TCR is, therefore, crucial for assessing their immunogenic potential in clinical settings.
 
 We present THLANet, a deep learning model designed to predict the binding specificity of TCR to neoantigens presented by class I HLAs. THLAnet employs evolutionary scale modeling-2 (ESM-2), replacing the traditional embedding methods to enhance sequence feature representation. Using scTCR-seq data, we obtained the TCR immune repertoire and constructed a TCR-pHLA binding database to validate THLANet’s clinical potential. The model’s performance was further evaluated using clinical cancer data across various cancer types. Additionally, by analyzing divided complementarity-determining region (CDR3) sequences and simulating alanine scanning of antigen sequences, we unveiled the 3D binding conformations of TCRs and antigens. Predicting TCR-neoantigen pairing remains a significant challenge in immunology; however, THLANet provides accurate predictions using only the TCR sequence (CDR3β), antigen sequence, and class I HLA, offering novel insights into TCR- antigen interactions.
@@ -51,7 +54,4 @@ python TextCNN_ESM2_train2.py
 The authors sincerely hope to receive any suggestions from you!
 
 IF you have any problem, please contact us.  Email: 23B903048@stu.hit.edu.cn
-## Architecture
-<p align="center">
-<img src="https://github.com/ChanganMakeYi/THLAnet/blob/main/THLAnet.png" align="middle" height="80%" width="80%" />
-</p >
+
