@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="ipktnvzrgglqmlawsnow.deepln.com" id="e9ac963b-336c-4816-ac20-5afd23ad5534" port="53275" nameFormat="DESCRIPTIVE" username="root" />
+    </configs>
+  </component>
+</project>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="ac850016-0af3-409c-990e-d907e8961491" name="ipktnvzrgglqmlawsnow.deepln.com">
+        <fileTransfer rootFolder="/data/coding/syncdata-ijeohlhikjjjxnmj-snow20240722/data/coding/syncdata-ympnsubnqufonjta-snow20240713/data/TCR-pHLA2-esm2" accessType="SFTP" host="ipktnvzrgglqmlawsnow.deepln.com" port="53275" sshConfigId="e9ac963b-336c-4816-ac20-5afd23ad5534" sshConfig="root@ipktnvzrgglqmlawsnow.deepln.com:53275 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
