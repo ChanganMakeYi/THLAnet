@@ -45,7 +45,7 @@ python TransformerEncoderLayer.py
 
 python BilinearMultiHeadSelfAttention.py
 
-python TextCNN_ESM2_train2.py
+python TextCNN_ESM2_train_best.py
 
 ```
 
