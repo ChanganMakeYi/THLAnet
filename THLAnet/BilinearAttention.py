@@ -7,19 +7,16 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class BilinearMultiHeadSelfAttention(nn.Module):
-    """双线性多头自注意力机制，支持不同序列长度的输入并对齐序列长度"""
-
     def __init__(self, dim_in1, dim_in2, dim_out, num_heads, seq_len1=80, seq_len2=79, dropout=0.3):
         super(BilinearMultiHeadSelfAttention, self).__init__()
         self.num_heads = num_heads
         self.dim_out = dim_out
         self.head_dim = dim_out // num_heads
-        self.dropout = nn.Dropout(dropout)  # 增加 dropout 率以增强正则化
+        self.dropout = nn.Dropout(dropout)
         self.seq_len1 = seq_len1
         self.seq_len2 = seq_len2
 
@@ -30,15 +27,13 @@ class BilinearMultiHeadSelfAttention(nn.Module):
         self.linear_k = nn.Linear(dim_in2, dim_out, bias=False)
         self.linear_v = nn.Linear(dim_in1, dim_out, bias=False)
         self.fc_out = nn.Linear(dim_out, dim_out)
-        self.layer_norm = nn.LayerNorm(dim_out)  # 添加 LayerNorm 改善训练稳定性
+        self.layer_norm = nn.LayerNorm(dim_out)
 
-        # 序列长度对齐层（将 x2 的序列长度从 79 转换为 80）
         self.align_seq = nn.Linear(seq_len2, seq_len1)
 
     def forward(self, x1_chunk, x2_chunk):
-        """前向传播，处理两个输入序列并对齐 x2 的序列长度"""
         x1_chunk, x2_chunk = x1_chunk.float(), x2_chunk.float()
-        x2_chunk = self.align_seq(x2_chunk.transpose(1, 2)).transpose(1, 2)  # [batch_size, 80, dim_in2]
+        x2_chunk = self.align_seq(x2_chunk.transpose(1, 2)).transpose(1, 2)
         Q = self.linear_q(x1_chunk)
         K = self.linear_k(x2_chunk)
         V = self.linear_v(x1_chunk)
@@ -52,12 +47,11 @@ class BilinearMultiHeadSelfAttention(nn.Module):
         output = torch.matmul(attention_weights, V)
         output = output.transpose(1, 2).contiguous().view(batch_size, self.seq_len1, self.dim_out)
         output = self.fc_out(output)
-        output = self.layer_norm(output)  # 应用 LayerNorm
+        output = self.layer_norm(output)
         output = self.dropout(output)
         return output
 
 def validate_args(args):
-    """验证命令行参数"""
     if not isinstance(args.esm_data, str) or not args.esm_data:
         raise ValueError("esm_data 必须为非空字符串路径")
     if not isinstance(args.transformer_data, str) or not args.transformer_data:
@@ -78,7 +72,6 @@ def validate_args(args):
         raise ValueError("seq_len1 和 seq_len2 必须为正整数")
 
 def load_data(file_path, data_name):
-    """加载数据并转换为 torch.Tensor"""
     logger.info(f"加载 {data_name}...")
     ext = os.path.splitext(file_path)[1].lower()
     try:
@@ -95,7 +88,6 @@ def load_data(file_path, data_name):
     return convert_to_tensor(data, data_name)
 
 def convert_to_tensor(data, data_name):
-    """将输入数据转换为 torch.Tensor"""
     if isinstance(data, torch.Tensor):
         return data
     elif isinstance(data, np.ndarray):
@@ -109,7 +101,6 @@ def convert_to_tensor(data, data_name):
             raise ValueError(f"无法将 {data_name} 转换为 torch.Tensor: {e}")
 
 def process_data_in_chunks(model, x1, x2, chunk_size, device):
-    """分块处理数据"""
     logger.info("开始分块处理数据...")
     model.eval()
     output_chunks = []
@@ -124,7 +115,6 @@ def process_data_in_chunks(model, x1, x2, chunk_size, device):
     return torch.cat(output_chunks, dim=0)
 
 def validate_output(output, expected_shape):
-    """验证输出数据的形状和分布"""
     if output.shape != expected_shape:
         logger.warning(f"输出形状 {output.shape} 与预期 {expected_shape} 不匹配")
     if torch.isnan(output).any() or torch.isinf(output).any():
@@ -132,7 +122,6 @@ def validate_output(output, expected_shape):
     return output
 
 def main():
-    """主函数，运行双线性注意力机制"""
     parser = argparse.ArgumentParser(description="双线性多头自注意力机制处理蛋白质序列数据")
     parser.add_argument('--esm_data', type=str, required=True, help='ESM 数据文件路径')
     parser.add_argument('--transformer_data', type=str, required=True, help='Transformer 数据文件路径')
@@ -140,12 +129,12 @@ def main():
                         help='输出文件路径')
     parser.add_argument('--dim_in1', type=int, default=1280, help='ESM 数据输入维度')
     parser.add_argument('--dim_in2', type=int, default=21, help='Transformer 数据输入维度')
-    parser.add_argument('--dim_out', type=int, default=512, help='输出维度')  # 减少 dim_out
-    parser.add_argument('--num_heads', type=int, default=4, help='注意力头数')  # 减少 num_heads
+    parser.add_argument('--dim_out', type=int, default=1000, help='输出维度')
+    parser.add_argument('--num_heads', type=int, default=4, help='注意力头数')
     parser.add_argument('--seq_len1', type=int, default=80, help='ESM 数据序列长度')
     parser.add_argument('--seq_len2', type=int, default=80, help='Transformer 数据序列长度')
-    parser.add_argument('--dropout', type=float, default=0.3, help='丢弃率')  # 增加 dropout
-    parser.add_argument('--chunk_size', type=int, default=2000, help='分块大小')  # 减小 chunk_size
+    parser.add_argument('--dropout', type=float, default=0.3, help='丢弃率')
+    parser.add_argument('--chunk_size', type=int, default=2000, help='分块大小')
 
     args = parser.parse_args()
 
@@ -159,15 +148,14 @@ def main():
     logger.info(f"使用设备: {device}")
 
     try:
-        x1 = load_data(args.esm_data, "ESM 数据")  # 预期形状: [n, 80, 1280]
-        x2 = load_data(args.transformer_data, "Transformer 数据")  # 预期形状: [n, 79, 21]
+        x1 = load_data(args.esm_data, "ESM 数据")
+        x2 = load_data(args.transformer_data, "Transformer 数据")
         logger.info(f"ESM 数据形状: {x1.shape}")
         logger.info(f"Transformer 数据形状: {x2.shape}")
     except Exception as e:
         logger.error(f"加载数据失败: {e}")
         return
 
-    # 检查并修正 Transformer 数据维度顺序
     if x2.size(1) == 21 and x2.size(2) == 80:
         logger.info("检测到 Transformer 数据维度顺序为 [n, 21, 79]，正在转置为 [n, 79, 21]")
         x2 = x2.transpose(1, 2)

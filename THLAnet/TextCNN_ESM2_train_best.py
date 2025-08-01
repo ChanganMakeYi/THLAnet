@@ -14,7 +14,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import MLPtrain as mlp
 import process_encoder
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -25,10 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 class Config:
-    """训练配置参数。"""
-
     def __init__(self, args):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.batch_size = args.batch_size
@@ -45,15 +41,13 @@ class Config:
         self.val_split = 0.05
         self.classification_threshold = 0.2
 
-
-class RatioSampler:
-    """按指定比例抽取负样本和正样本的采样器，确保每批次至少一个正类。"""
-
-    def __init__(self, dataset, neg_pos_ratio, batch_size):
+class DynamicHLASampler:
+    def __init__(self, dataset, hla_list, neg_pos_ratio, batch_size):
         self.dataset = dataset
         self.neg_pos_ratio = neg_pos_ratio
         self.batch_size = batch_size
         self.labels = [int(dataset[i][1].item()) for i in range(len(dataset))]
+        self.hla_list = hla_list
         self.neg_indices = [i for i, label in enumerate(self.labels) if label == 0]
         self.pos_indices = [i for i, label in enumerate(self.labels) if label == 1]
         self.num_neg = len(self.neg_indices)
@@ -67,36 +61,66 @@ class RatioSampler:
         if self.neg_per_batch < 1:
             raise ValueError(f"批次大小 {self.batch_size} 不足以按比例 {self.neg_pos_ratio}:1 分配样本")
 
+        self.hla_freq = self.compute_hla_frequencies()
+        self.sample_weights = self.compute_sample_weights()
+
+    def compute_hla_frequencies(self):
+        from collections import Counter
+        hla_counter = Counter(self.hla_list)
+        total = len(self.hla_list)
+        freq = {hla: count / total for hla, count in hla_counter.items()}
+        return freq
+
+    def compute_sample_weights(self):
+        weights = []
+        for hla in self.hla_list:
+            freq = self.hla_freq.get(hla, 1e-6)
+            weight = 1.0 / freq if freq > 0 else 1.0
+            weights.append(weight)
+        return np.array(weights)
+
     def __iter__(self):
-        neg_indices = self.neg_indices.copy()
-        pos_indices = self.pos_indices.copy()
-        random.shuffle(neg_indices)
-        random.shuffle(pos_indices)
+        neg_indices = np.array(self.neg_indices)
+        pos_indices = np.array(self.pos_indices)
+        neg_weights = self.sample_weights[neg_indices]
+        pos_weights = self.sample_weights[pos_indices]
+
+        neg_probs = neg_weights / neg_weights.sum()
+        pos_probs = pos_weights / pos_weights.sum()
 
         batches = []
-        neg_idx = pos_idx = 0
-        while neg_idx < len(neg_indices) and pos_idx < len(pos_indices):
+        neg_sampled = 0
+        pos_sampled = 0
+        total_samples = len(self.dataset)
+
+        while neg_sampled < len(neg_indices) or pos_sampled < len(pos_indices):
             batch = []
-            neg_count = min(self.neg_per_batch, len(neg_indices) - neg_idx)
-            batch.extend(neg_indices[neg_idx:neg_idx + neg_count])
-            neg_idx += neg_count
-            pos_count = min(self.pos_per_batch, len(pos_indices) - pos_idx)
-            batch.extend(pos_indices[pos_idx:pos_idx + pos_count])
-            pos_idx += pos_count
+
+            if neg_sampled < len(neg_indices):
+                neg_count = min(self.neg_per_batch, len(neg_indices) - neg_sampled)
+                neg_batch = np.random.choice(neg_indices, size=neg_count, replace=False, p=neg_probs)
+                batch.extend(neg_batch.tolist())
+                neg_sampled += neg_count
+
+            if pos_sampled < len(pos_indices):
+                pos_count = min(self.pos_per_batch, len(pos_indices) - pos_sampled)
+                pos_batch = np.random.choice(pos_indices, size=pos_count, replace=False, p=pos_probs)
+                batch.extend(pos_batch.tolist())
+                pos_sampled += pos_count
+
             random.shuffle(batch)
             batches.extend(batch)
 
-        remaining = neg_indices[neg_idx:] + pos_indices[pos_idx:]
-        random.shuffle(remaining)
-        batches.extend(remaining)
-        return iter(batches[:len(self.dataset)])
+            if len(batches) >= total_samples:
+                break
+
+        random.shuffle(batches)
+        return iter(batches[:total_samples])
 
     def __len__(self):
         return len(self.dataset)
 
-
 def load_data(config):
-    """加载并预处理标签和 ESM 数据。"""
     try:
         labels = np.array(process_encoder.get_label(config.file_path_train))
         logger.info(f"原始标签唯一值: {np.unique(labels)}")
@@ -111,26 +135,28 @@ def load_data(config):
         logger.info(f"负样本数: {num_neg}, 正样本数: {num_pos}")
 
         esm_data = torch.load(config.data_transfomer_esm, map_location='cpu')
-        logger.info(f"ESM 数据形状: {esm_data.shape}")
-        if esm_data.shape[1:] != (80, 21):
-            raise ValueError(f"预期 ESM 数据形状为 [n, 80, 21]，实际为 {esm_data.shape}")
+        logger.info(f"数据形状: {esm_data.shape}")
+        if esm_data.shape[1:] != (80, 1000):
+            raise ValueError(f"预期 ESM 数据形状为 [n, 80, 1000]，实际为 {esm_data.shape}")
         esm_data = esm_data.to(dtype=torch.float32)
 
-        if esm_data.shape[0] != labels.shape[0]:
-            min_samples = min(esm_data.shape[0], labels.shape[0])
+        df = pd.read_csv(config.file_path_train)
+        hla_list = df['HLA'].tolist()
+
+        if esm_data.shape[0] != labels.shape[0] or esm_data.shape[0] != len(hla_list):
+            min_samples = min(esm_data.shape[0], labels.shape[0], len(hla_list))
             logger.warning(
-                f"样本数不匹配: esm_data 有 {esm_data.shape[0]} 个样本，labels 有 {labels.shape[0]} 个样本。截断到 {min_samples} 个样本。")
+                f"样本数不匹配: esm_data 有 {esm_data.shape[0]} 个样本，labels 有 {labels.shape[0]} 个样本，HLA 有 {len(hla_list)} 个。截断到 {min_samples} 个样本。")
             esm_data = esm_data[:min_samples]
             labels = labels[:min_samples]
+            hla_list = hla_list[:min_samples]
 
-        return esm_data, labels, num_pos, num_neg
+        return esm_data, labels, num_pos, num_neg, hla_list
     except Exception as e:
         logger.error(f"加载数据失败: {e}")
         raise
 
-
-def create_dataloaders(esm_data, labels, config):
-    """创建训练、验证和测试数据加载器。"""
+def create_dataloaders(esm_data, labels, hla_list, config):
     dataset = TensorDataset(esm_data, labels)
     total_size = len(dataset)
     train_size = int(config.train_split * total_size)
@@ -138,22 +164,24 @@ def create_dataloaders(esm_data, labels, config):
     test_size = total_size - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+    train_hla = [hla_list[i] for i in train_dataset.indices]
+    val_hla = [hla_list[i] for i in val_dataset.indices]
+    test_hla = [hla_list[i] for i in test_dataset.indices]
+
     logger.info(f"训练集大小: {len(train_dataset)}, 验证集大小: {len(val_dataset)}, 测试集大小: {len(test_dataset)}")
 
-    train_sampler = RatioSampler(train_dataset, config.neg_pos_ratio, config.batch_size)
-    val_sampler = RatioSampler(val_dataset, config.neg_pos_ratio, config.batch_size)
-    test_sampler = RatioSampler(test_dataset, config.neg_pos_ratio, config.batch_size)
+    train_sampler = DynamicHLASampler(train_dataset, train_hla, config.neg_pos_ratio, config.batch_size)
+    val_sampler = DynamicHLASampler(val_dataset, val_hla, config.neg_pos_ratio, config.batch_size)
+    test_sampler = DynamicHLASampler(test_dataset, test_hla, config.neg_pos_ratio, config.batch_size)
     train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, sampler=val_sampler)
     test_dataloader = DataLoader(test_dataset, batch_size=config.batch_size, sampler=test_sampler)
     return train_dataloader, val_dataloader, test_dataloader
 
-
 def initialize_model(config):
-    """初始化 MLP 模型并验证输出形状。"""
     try:
         model = mlp.MLPtrain(hidden_dims=[1024, 512, 256, 128], dropout_rate=0.5).to(config.device)
-        dummy_input = torch.randn(1, 80, 21).to(config.device)
+        dummy_input = torch.randn(1, 80, 1000).to(config.device)
         output = model(dummy_input)
         if output.shape != torch.Size([1, 1]):
             raise ValueError(f"预期输出形状为 [batch_size, 1]，实际为 {output.shape}")
@@ -165,9 +193,7 @@ def initialize_model(config):
         logger.error(f"模型初始化失败: {e}")
         raise
 
-
 def train_epoch(model, dataloader, optimizer, criterion, config):
-    """训练一个 epoch。"""
     model.train()
     epoch_loss = 0
     for i, (batch_x, batch_y) in enumerate(tqdm(dataloader, desc="训练批次")):
@@ -187,9 +213,7 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
         torch.cuda.empty_cache()
     return epoch_loss / len(dataloader)
 
-
 def evaluate(model, dataloader, config):
-    """在验证或测试集上评估模型。"""
     model.eval()
     labels_all = []
     outputs_all = []
@@ -243,9 +267,7 @@ def evaluate(model, dataloader, config):
         f"输出概率统计 - 均值: {outputs_all.mean():.4f}, 标准差: {outputs_all.std():.4f}, 最小值: {outputs_all.min():.4f}, 最大值: {outputs_all.max():.4f}")
     return metrics, confusion
 
-
 def save_results(val_metrics, test_metrics, test_confusion, config):
-    """保存训练和测试结果到文件。"""
     try:
         os.makedirs("data", exist_ok=True)
         with open("data/output.txt", "a", encoding="utf-8") as file:
@@ -271,9 +293,7 @@ def save_results(val_metrics, test_metrics, test_confusion, config):
     except Exception as e:
         logger.error(f"保存结果失败: {e}")
 
-
 def main():
-    """主训练循环。"""
     parser = argparse.ArgumentParser(description="训练 MLP 模型用于二分类，带比例采样")
     parser.add_argument('--file_path_train', type=str, required=True, help='训练数据集路径')
     parser.add_argument('--epoch', type=int, required=True, help='训练轮数')
@@ -283,15 +303,15 @@ def main():
     parser.add_argument('--lr', type=float, default=0.001, help='学习率')
     parser.add_argument('--accum_steps', type=int, default=4, help='梯度累积步数')
     parser.add_argument('--neg_pos_ratio', type=float, default=2.0, help='负样本:正样本比例')
-    parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')  # 加强正则化
+    parser.add_argument('--weight_decay', type=float, default=1e-4, help='权重衰减')
     parser.add_argument('--patience', type=int, default=5, help='早停耐心值')
     args = parser.parse_args()
 
     config = Config(args)
     logger.info(f"使用设备: {config.device}")
 
-    esm_data, labels, num_pos, num_neg = load_data(config)
-    train_dataloader, val_dataloader, test_dataloader = create_dataloaders(esm_data, labels, config)
+    esm_data, labels, num_pos, num_neg, hla_list = load_data(config)
+    train_dataloader, val_dataloader, test_dataloader = create_dataloaders(esm_data, labels, hla_list, config)
     model = initialize_model(config)
 
     pos_weight = torch.tensor([num_neg / num_pos * 0.5]).to(config.device) if num_pos > 0 else torch.tensor([1.0]).to(
@@ -357,7 +377,6 @@ def main():
 
     save_results(val_metrics, test_metrics, test_confusion, config)
     torch.cuda.empty_cache()
-
 
 if __name__ == "__main__":
     main()
