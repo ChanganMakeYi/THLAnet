@@ -11,7 +11,6 @@ esm_dir = "fabook/esm2-650-MHC"
 tokenizer = AutoTokenizer.from_pretrained(esm_dir)
 model = AutoModelForMaskedLM.from_pretrained(esm_dir)
 model.to(device)
-print(f"Loaded ESM-2 150M model from {esm_dir}")
 
 csv_file = "pretrain_data/train_data_antigen.csv"
 df = pd.read_csv(csv_file)
